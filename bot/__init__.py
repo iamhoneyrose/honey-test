@@ -439,7 +439,7 @@ if ospath.exists("list_drives.txt"):
 
 if BASE_URL:
     Popen(
-        f"gunicorn web.wserver:app --bind 0.0.0.0:{BASE_URL_PORT} --worker-class gevent",
+        f"gunicorn web.wserver:app --bind 0.0.0.0:{environ.get('PORT')} --worker-class gevent",
         shell=True,
     )
 
