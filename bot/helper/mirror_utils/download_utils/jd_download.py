@@ -1,7 +1,7 @@
 from pyrogram.handlers import CallbackQueryHandler
 from pyrogram.filters import regex, user
 from functools import partial
-from asyncio import wait_for, Event, wrap_future
+from asyncio import wait_for, Event, wrap_future, sleep
 
 from bot.helper.mirror_utils.status_utils.queue_status import QueueStatus
 from bot.helper.mirror_utils.status_utils.jdownloader_status import JDownloaderStatus
@@ -24,7 +24,6 @@ from bot import (
     queue_dict_lock,
     jd_lock,
     jd_downloads,
-    config_dict,
 )
 
 
@@ -85,29 +84,24 @@ class JDownloaderHelper:
 async def add_jd_download(listener, path):
     async with jd_lock:
         if jdownloader.device is None:
-            if config_dict["JD_EMAIL"] and config_dict["JD_PASS"]:
-                await sync_to_async(jdownloader.connect)
-            else:
-                await listener.onDownloadError("NO JDownloader credentials!")
-                return
-            await retry_function(
-                sync_to_async,
-                jdownloader.device.linkgrabber.clear_list,
-            )
+            await listener.onDownloadError(jdownloader.error)
+            return
 
-        if not jd_downloads and (
-            odl := await retry_function(
-                sync_to_async, jdownloader.device.downloads.query_packages, [{}]
-            )
-        ):
-            odl_list = []
-            for od in odl:
-                odl_list.append(od["uuid"])
+        if not jd_downloads:
             await retry_function(
-                sync_to_async,
-                jdownloader.device.downloads.remove_links,
-                package_ids=odl_list,
+                sync_to_async, jdownloader.device.linkgrabber.clear_list
             )
+            if odl := await retry_function(
+                sync_to_async, jdownloader.device.downloads.query_packages, [{}]
+            ):
+                odl_list = []
+                for od in odl:
+                    odl_list.append(od["uuid"])
+                await retry_function(
+                    sync_to_async,
+                    jdownloader.device.downloads.remove_links,
+                    package_ids=odl_list,
+                )
 
         await retry_function(
             sync_to_async,
@@ -192,6 +186,8 @@ async def add_jd_download(listener, path):
         [gid],
     )
 
+    await sleep(1)
+
     download_packages = await retry_function(
         sync_to_async,
         jdownloader.device.downloads.query_packages,
@@ -207,15 +203,15 @@ async def add_jd_download(listener, path):
                 exists = True
                 break
 
+    if not exists:
+        await listener.onDownloadError("This Download have been removed manually!")
+        return
+
     await retry_function(
         sync_to_async,
         jdownloader.device.downloads.force_download,
         package_ids=[gid],
     )
-
-    if not exists:
-        await listener.onDownloadError("This Download have been removed manually!")
-        return
 
     async with task_dict_lock:
         task_dict[listener.mid] = JDownloaderStatus(listener, f"{gid}")
